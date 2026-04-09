@@ -1,0 +1,282 @@
+// NELTAL - Schema de Base de Datos COMPLETO
+// Sistema Multiusuario con Memoria y Agentes
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// MULTIUSUARIO - Oficinas y Usuarios
+// ============================================
+
+// Cada oficina/consultora tiene su propio espacio
+model Oficina {
+  id              String    @id @default(cuid())
+  nombre          String
+  slug            String    @unique
+  logo            String?
+  activa          Boolean   @default(true)
+  plan           String    @default("gratis") // gratis, basico, premium
+  
+  // Configuración de agentes personalizada
+  configAgentes   String?   // JSON con configuración de agentes
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  usuarios        Usuario[]
+  clientes        Cliente[]
+  conversaciones  Conversacion[]
+  citas           Cita[]
+  documentos      Documento[]
+}
+
+// Usuarios de cada oficina
+model Usuario {
+  id              String    @id @default(cuid())
+  oficinaId       String
+  oficina         Oficina   @relation(fields: [oficinaId], references: [id], onDelete: Cascade)
+  
+  nombre          String
+  email           String    @unique
+  password        String    // Hash
+  telefono        String?
+  telegramId      String?   // Para conectar con bot
+  rol            String    @default("usuario") // admin, usuario, agente
+  
+  // Permisos específicos
+  permisos       String?   // JSON array de permisos
+  
+  activo         Boolean   @default(true)
+  ultimoAcceso   DateTime?
+  
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  
+  conversaciones Conversacion[]
+  mensajes       Mensaje[]
+  citas          Cita[]
+}
+
+// ============================================
+// MEMORIA - Conversaciones con JARVIS
+// ============================================
+
+model Conversacion {
+  id              String    @id @default(cuid())
+  oficinaId       String
+  oficina         Oficina   @relation(fields: [oficinaId], references: [id], onDelete: Cascade)
+  usuarioId       String
+  usuario         Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  
+  titulo          String?   @default("Nueva conversación")
+  contexto        String?   // JSON con contexto acumulado
+  
+  // Para saber qué agente está activo
+  agenteActivo    String?   @default("jarvis")
+  
+  activa          Boolean   @default(true)
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  mensajes        Mensaje[]
+}
+
+model Mensaje {
+  id              String    @id @default(cuid())
+  conversacionId  String
+  conversacion    Conversacion @relation(fields: [conversacionId], references: [id], onDelete: Cascade)
+  usuarioId       String?
+  usuario         Usuario?  @relation(fields: [usuarioId], references: [id])
+  
+  rol             String    // usuario, jarvis, agente_financiero, etc.
+  contenido       String
+  
+  // Metadatos para herramientas usadas
+  herramientas    String?   // JSON con herramientas usadas
+  
+  createdAt       DateTime  @default(now())
+}
+
+// ============================================
+// CLIENTES Y DIAGNÓSTICOS
+// ============================================
+
+model Cliente {
+  id              String        @id @default(cuid())
+  oficinaId       String
+  oficina         Oficina       @relation(fields: [oficinaId], references: [id], onDelete: Cascade)
+  
+  nombre          String
+  nombreNegocio   String
+  giro            String?
+  giroOtro        String?
+  telefono        String?
+  email           String?
+  ubicacion       String?
+  tiempoOperacion Int           @default(0)
+  empleados       Int           @default(0)
+  tieneLocal      Boolean       @default(false)
+  
+  // Etiquetas para segmentación
+  etiquetas       String?       // JSON array
+  
+  // Scoring
+  score          Int           @default(0)
+  status         String        @default("prospecto") // prospecto, activo, inactivo
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  diagnosticos    Diagnostico[]
+  citas           Cita[]
+  documentos      Documento[]
+}
+
+model Diagnostico {
+  id            String    @id @default(cuid())
+  clienteId     String
+  cliente       Cliente   @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  
+  // Quién realizó el diagnóstico
+  usuarioId     String?
+  
+  // Respuestas crudas de la entrevista (JSON)
+  respuestas    String?
+  
+  // Métricas de Ventas
+  ventasMesPromedio    Float?    @default(0)
+  ventasMesBuenas      Float?    @default(0)
+  ventasMesMalas       Float?    @default(0)
+  variabilidadIngresos Float?    @default(0)
+  variabilidadNivel    String?
+  
+  // Ciclo de Conversión de Efectivo
+  cccDias              Float?    @default(0)
+  cccNivel             String?
+  
+  // Concentración de Clientes
+  concentracionPrincipal Float?  @default(0)
+  concentracionTop3    Float?    @default(0)
+  concentracionNivel   String?
+  
+  // Índice de Dependencia del Dueño
+  idd                  Float?    @default(0)
+  iddNivel             String?
+  
+  // Gap de Formalización
+  gfActual             Float?    @default(0)
+  gfGap                Float?    @default(0)
+  gfNivel              String?
+  
+  // Estructura de Costos
+  gastosFijos          Float?    @default(0)
+  gastosVariables      Float?    @default(0)
+  gastosTotales        Float?    @default(0)
+  puntoEquilibrio      Float?    @default(0)
+  utilidadEstimada     Float?    @default(0)
+  
+  // Antigüedad
+  antiguedad           Float?    @default(0)
+  antiguedadNivel      String?
+  
+  // Análisis generado (JSON)
+  alertas              String?
+  fortalezas           String?
+  recomendaciones      String?
+  oportunidades        String?
+  
+  // Estado
+  estado               String    @default("pendiente")
+  
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  
+  documentos           Documento[]
+}
+
+// ============================================
+// CITAS Y PROGRAMACIÓN
+// ============================================
+
+model Cita {
+  id              String    @id @default(cuid())
+  oficinaId       String
+  oficina         Oficina   @relation(fields: [oficinaId], references: [id], onDelete: Cascade)
+  clienteId       String?
+  cliente         Cliente?  @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  usuarioId       String?
+  usuario         Usuario?  @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  
+  titulo          String
+  descripcion     String?
+  fecha           DateTime
+  duracion        Int       @default(60) // minutos
+  
+  tipo            String    @default("entrevista") // entrevista, seguimiento, asesoria
+  estado          String    @default("pendiente") // pendiente, confirmada, completada, cancelada
+  
+  // Recordatorios enviados
+  recordatorios   String?   // JSON array de recordatorios enviados
+  
+  // Notas post-cita
+  notas           String?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// ============================================
+// DOCUMENTOS GENERADOS
+// ============================================
+
+model Documento {
+  id              String    @id @default(cuid())
+  oficinaId       String
+  oficina         Oficina   @relation(fields: [oficinaId], references: [id], onDelete: Cascade)
+  clienteId       String?
+  cliente         Cliente?  @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  diagnosticoId   String?
+  diagnostico     Diagnostico? @relation(fields: [diagnosticoId], references: [id], onDelete: SetNull)
+  
+  tipo            String    // pdf_propuesta, pdf_diagnostico, contrato, etc.
+  titulo          String
+  contenido       String?   // Para documentos cortos
+  archivoUrl      String?   // URL del archivo generado
+  
+  // Quién lo generó
+  generadoPor     String?   // jarvis, agente_financiero, usuario, etc.
+  
+  createdAt       DateTime  @default(now())
+}
+
+// ============================================
+// TAREAS DE AGENTES
+// ============================================
+
+model TareaAgente {
+  id              String    @id @default(cuid())
+  oficinaId       String
+  
+  agente          String    // jarvis, financiero, contaduria, programacion, reportes
+  tipo            String    // analisis, reporte, recordatorio, investigacion
+  
+  descripcion     String
+  parametros      String?   // JSON con parámetros
+  
+  resultado       String?   // JSON con resultado
+  estado          String    @default("pendiente") // pendiente, en_proceso, completada, error
+  
+  creadoPor       String?   // usuarioId o jarvis
+  
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
