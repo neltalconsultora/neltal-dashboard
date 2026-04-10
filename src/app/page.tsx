@@ -69,7 +69,9 @@ import {
   User,
   Briefcase,
   Heart,
-  MessageSquare
+  MessageSquare,
+  Clock,
+  Play
 } from 'lucide-react'
 
 // ============================================
@@ -670,6 +672,8 @@ export default function Home() {
   const [jarvisUrl, setJarvisUrl] = useState(getJarvisUrl)
   const [jarvisStatus, setJarvisStatus] = useState<'unknown' | 'online' | 'offline'>('unknown')
   const [probandoJarvis, setProbandoJarvis] = useState(false)
+  const [guardadoAutomatico, setGuardadoAutomatico] = useState(false)
+  const [haySesionGuardada, setHaySesionGuardada] = useState<{nombreNegocio: string, timestamp: string} | null>(null)
   
   // Ref para scroll automático
   const entrevistaRef = useRef<HTMLDivElement>(null)
@@ -678,8 +682,12 @@ export default function Home() {
     nombre: '', nombreNegocio: '', giro: '', telefono: '', ubicacion: ''
   })
 
+  // ============================================
+  // EFECTOS
+  // ============================================
   useEffect(() => {
     fetchData()
+    verificarSesionGuardada()
   }, [])
 
   // Guardar configuración de agentes
@@ -688,6 +696,100 @@ export default function Home() {
       localStorage.setItem('neltal_agentes_config', JSON.stringify(agentes))
     }
   }, [agentes])
+
+  // ============================================
+  // PERSISTENCIA AUTOMÁTICA
+  // ============================================
+  
+  // Guardar respuestas automáticamente
+  useEffect(() => {
+    if (typeof window !== 'undefined' && Object.keys(respuestas).length > 0 && clienteActual?.id) {
+      const sesionData = {
+        respuestas,
+        bloqueActual,
+        clienteActual,
+        timestamp: new Date().toISOString()
+      }
+      localStorage.setItem('neltal_sesion_activa', JSON.stringify(sesionData))
+      
+      setGuardadoAutomatico(true)
+      setTimeout(() => setGuardadoAutomatico(false), 1500)
+    }
+  }, [respuestas, bloqueActual, clienteActual])
+
+  const verificarSesionGuardada = () => {
+    if (typeof window !== 'undefined') {
+      const sesionGuardada = localStorage.getItem('neltal_sesion_activa')
+      if (sesionGuardada) {
+        try {
+          const sesion = JSON.parse(sesionGuardada)
+          const horasDiferencia = (new Date().getTime() - new Date(sesion.timestamp).getTime()) / (1000 * 60 * 60)
+          
+          if (horasDiferencia < 24 && sesion.clienteActual?.id) {
+            setHaySesionGuardada({
+              nombreNegocio: sesion.clienteActual.nombreNegocio,
+              timestamp: sesion.timestamp
+            })
+          }
+        } catch (e) {
+          console.log('Error verificando sesión:', e)
+        }
+      }
+    }
+  }
+
+  const recuperarSesion = () => {
+    if (typeof window !== 'undefined') {
+      const sesionGuardada = localStorage.getItem('neltal_sesion_activa')
+      if (sesionGuardada) {
+        try {
+          const sesion = JSON.parse(sesionGuardada)
+          setRespuestas(sesion.respuestas || {})
+          setBloqueActual(sesion.bloqueActual || 0)
+          setClienteActual(sesion.clienteActual)
+          setEntrevistaOpen(true)
+          setHaySesionGuardada(null)
+        } catch (e) {
+          console.log('Error recuperando sesión:', e)
+        }
+      }
+    }
+  }
+
+  const limpiarSesion = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('neltal_sesion_activa')
+    }
+  }
+
+  // Continuar entrevista de un cliente existente
+  const continuarEntrevista = (cliente: any) => {
+    // Buscar si hay una sesión guardada para este cliente específico
+    const sesionGuardada = localStorage.getItem('neltal_sesion_activa')
+    if (sesionGuardada) {
+      try {
+        const sesion = JSON.parse(sesionGuardada)
+        if (sesion.clienteActual?.id === cliente.id) {
+          // Recuperar sesión existente
+          setRespuestas(sesion.respuestas || {})
+          setBloqueActual(sesion.bloqueActual || 0)
+          setClienteActual(cliente)
+          setEntrevistaOpen(true)
+          setHaySesionGuardada(null)
+          return
+        }
+      } catch (e) {
+        console.log('Error recuperando sesión:', e)
+      }
+    }
+    
+    // Si no hay sesión guardada para este cliente, empezar nueva
+    setClienteActual(cliente)
+    setBloqueActual(0)
+    setRespuestas({})
+    setEntrevistaOpen(true)
+    limpiarSesion()
+  }
 
   const fetchData = async () => {
     try {
@@ -727,6 +829,7 @@ export default function Home() {
       setEntrevistaOpen(true)
       setBloqueActual(0)
       setRespuestas({})
+      limpiarSesion()
       
       // Scroll automático al inicio de la entrevista
       setTimeout(() => {
@@ -813,6 +916,7 @@ export default function Home() {
       
       setDiagnosticoSeleccionado(diagnosticoGuardado)
       setEntrevistaOpen(false)
+      limpiarSesion()
       setReporteOpen(true)
       fetchData()
     } catch (error) {
@@ -988,6 +1092,11 @@ export default function Home() {
     }
   }
 
+  // Verificar si un cliente tiene diagnóstico completado
+  const clienteTieneDiagnostico = (clienteId: string) => {
+    return diagnosticos.some(d => d.clienteId === clienteId)
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -1070,6 +1179,33 @@ export default function Home() {
           {/* Dashboard */}
           {activeTab === 'dashboard' && (
             <div className="space-y-6">
+              {/* Aviso de sesión guardada */}
+              {haySesionGuardada && (
+                <Card className="border-amber-300 bg-amber-50">
+                  <CardContent className="pt-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Clock className="h-5 w-5 text-amber-600" />
+                        <div>
+                          <p className="font-medium text-amber-800">Tienes una entrevista sin terminar</p>
+                          <p className="text-sm text-amber-700">
+                            <strong>{haySesionGuardada.nombreNegocio}</strong> - Guardada hace {Math.round((new Date().getTime() - new Date(haySesionGuardada.timestamp).getTime()) / 60000)} minutos
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button onClick={recuperarSesion} className="bg-amber-600 hover:bg-amber-700">
+                          <Play className="h-4 w-4 mr-2" /> Continuar
+                        </Button>
+                        <Button onClick={() => { limpiarSesion(); setHaySesionGuardada(null); }} variant="outline">
+                          Descartar
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Stats */}
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <Card>
@@ -1129,7 +1265,76 @@ export default function Home() {
                 </Card>
               </div>
 
-              {/* Acciones y tabla */}
+              {/* Tabla de Clientes */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Users className="h-5 w-5" />
+                    Clientes
+                  </CardTitle>
+                  <CardDescription>Click en un cliente para continuar su entrevista o crear un nuevo diagnóstico</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {clientes.length === 0 ? (
+                    <div className="text-center py-8 text-slate-500">
+                      <Users className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                      <p>No hay clientes registrados</p>
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Negocio</TableHead>
+                          <TableHead>Dueño</TableHead>
+                          <TableHead>Giro</TableHead>
+                          <TableHead>Ubicación</TableHead>
+                          <TableHead>Estado</TableHead>
+                          <TableHead className="text-right">Acciones</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {clientes.map((c) => {
+                          const tieneDiagnostico = clienteTieneDiagnostico(c.id)
+                          return (
+                            <TableRow 
+                              key={c.id} 
+                              className="cursor-pointer hover:bg-slate-50" 
+                              onClick={() => continuarEntrevista(c)}
+                            >
+                              <TableCell className="font-medium">{c.nombreNegocio}</TableCell>
+                              <TableCell>{c.nombre}</TableCell>
+                              <TableCell>{c.giro || '-'}</TableCell>
+                              <TableCell>{c.ubicacion || '-'}</TableCell>
+                              <TableCell>
+                                {tieneDiagnostico ? (
+                                  <Badge variant="default" className="bg-green-600">Diagnosticado</Badge>
+                                ) : (
+                                  <Badge variant="outline">Pendiente</Badge>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    continuarEntrevista(c); 
+                                  }}
+                                  title="Nueva entrevista"
+                                >
+                                  <Play className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Acciones y tabla de diagnósticos */}
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={exportarCSV} disabled={diagnosticos.length === 0}>
                   <Download className="h-4 w-4 mr-2" /> Exportar CSV
@@ -1138,7 +1343,10 @@ export default function Home() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Diagnósticos</CardTitle>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="h-5 w-5" />
+                    Diagnósticos
+                  </CardTitle>
                   <CardDescription>Click en una fila para ver el reporte completo</CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1403,6 +1611,11 @@ export default function Home() {
             <DialogTitle className="flex items-center gap-2">
               <MessageCircle className="h-5 w-5" />
               Entrevista: {clienteActual.nombreNegocio}
+              {guardadoAutomatico && (
+                <Badge variant="outline" className="ml-2 text-green-600 border-green-300">
+                  <Save className="h-3 w-3 mr-1" /> Guardado
+                </Badge>
+              )}
             </DialogTitle>
             <DialogDescription>
               Bloque {bloqueActual + 1} de {preguntasEntrevista.length}: {bloqueActualData?.titulo}
@@ -1448,7 +1661,7 @@ export default function Home() {
             {/* Preguntas del bloque */}
             <ScrollArea className="h-[50vh]">
               <div className="space-y-6 pr-4">
-                {bloqueActualData?.preguntas.map((pregunta, idx) => (
+                {bloqueActualData?.preguntas.map((pregunta) => (
                   <Card key={pregunta.id}>
                     <CardContent className="pt-4">
                       <div className="space-y-3">
