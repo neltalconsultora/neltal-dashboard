@@ -698,24 +698,47 @@ export default function Home() {
   }, [agentes])
 
   // ============================================
-  // PERSISTENCIA AUTOMÁTICA
+  // PERSISTENCIA AUTOMÁTICA - GUARDADO INMEDIATO
   // ============================================
   
-  // Guardar respuestas automáticamente
-  useEffect(() => {
-    if (typeof window !== 'undefined' && Object.keys(respuestas).length > 0 && clienteActual?.id) {
+  // Función para guardar sesión INMEDIATAMENTE
+  const guardarSesionInmediato = (resp: Record<string, any>, bloque: number, cliente: any) => {
+    if (typeof window !== 'undefined' && cliente?.id) {
       const sesionData = {
-        respuestas,
-        bloqueActual,
-        clienteActual,
+        respuestas: resp,
+        bloqueActual: bloque,
+        clienteActual: cliente,
         timestamp: new Date().toISOString()
       }
       localStorage.setItem('neltal_sesion_activa', JSON.stringify(sesionData))
       
+      // Mostrar indicador de guardado
       setGuardadoAutomatico(true)
       setTimeout(() => setGuardadoAutomatico(false), 1500)
     }
-  }, [respuestas, bloqueActual, clienteActual])
+  }
+
+  // Wrapper para setRespuestas que guarda INMEDIATAMENTE
+  const actualizarRespuesta = (preguntaId: string, valor: any) => {
+    const nuevasRespuestas = { ...respuestas, [preguntaId]: valor }
+    setRespuestas(nuevasRespuestas)
+    // Guardar INMEDIATAMENTE, no esperar al useEffect
+    guardarSesionInmediato(nuevasRespuestas, bloqueActual, clienteActual)
+  }
+
+  // Wrapper para múltiples
+  const toggleMultiple = (preguntaId: string, opcion: string) => {
+    const actual = respuestas[preguntaId] || []
+    let nuevasOpciones: string[]
+    if (actual.includes(opcion)) {
+      nuevasOpciones = actual.filter((o: string) => o !== opcion)
+    } else {
+      nuevasOpciones = [...actual, opcion]
+    }
+    const nuevasRespuestas = { ...respuestas, [preguntaId]: nuevasOpciones }
+    setRespuestas(nuevasRespuestas)
+    guardarSesionInmediato(nuevasRespuestas, bloqueActual, clienteActual)
+  }
 
   const verificarSesionGuardada = () => {
     if (typeof window !== 'undefined') {
@@ -789,6 +812,17 @@ export default function Home() {
     setRespuestas({})
     setEntrevistaOpen(true)
     limpiarSesion()
+  }
+
+  // Cerrar entrevista y verificar si hay sesión
+  const cerrarEntrevista = (open: boolean) => {
+    if (!open) {
+      // Se está cerrando el modal - verificar sesión después de un momento
+      setTimeout(() => {
+        verificarSesionGuardada()
+      }, 100)
+    }
+    setEntrevistaOpen(open)
   }
 
   const fetchData = async () => {
@@ -1021,16 +1055,6 @@ export default function Home() {
     }
   }
 
-  const toggleMultiple = (preguntaId: string, opcion: string) => {
-    setRespuestas(prev => {
-      const actual = prev[preguntaId] || []
-      if (actual.includes(opcion)) {
-        return { ...prev, [preguntaId]: actual.filter((o: string) => o !== opcion) }
-      }
-      return { ...prev, [preguntaId]: [...actual, opcion] }
-    })
-  }
-
   // Guardar configuración de agentes
   const guardarConfigAgentes = () => {
     setGuardandoAgentes(true)
@@ -1076,20 +1100,30 @@ export default function Home() {
     alert('URL de JARVIS guardada')
   }
 
-  // Ir a siguiente bloque
+  // Ir a siguiente bloque - guarda antes de cambiar
   const siguienteBloque = () => {
     if (bloqueActual < preguntasEntrevista.length - 1) {
-      setBloqueActual(bloqueActual + 1)
+      const nuevoBloque = bloqueActual + 1
+      setBloqueActual(nuevoBloque)
+      guardarSesionInmediato(respuestas, nuevoBloque, clienteActual)
       entrevistaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
   }
 
-  // Ir a bloque anterior
+  // Ir a bloque anterior - guarda antes de cambiar
   const bloqueAnterior = () => {
     if (bloqueActual > 0) {
-      setBloqueActual(bloqueActual - 1)
+      const nuevoBloque = bloqueActual - 1
+      setBloqueActual(nuevoBloque)
+      guardarSesionInmediato(respuestas, nuevoBloque, clienteActual)
       entrevistaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
+  }
+
+  // Cambiar bloque directamente
+  const irABloque = (indice: number) => {
+    setBloqueActual(indice)
+    guardarSesionInmediato(respuestas, indice, clienteActual)
   }
 
   // Verificar si un cliente tiene diagnóstico completado
@@ -1604,15 +1638,15 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Modal Entrevista */}
-      <Dialog open={entrevistaOpen} onOpenChange={setEntrevistaOpen}>
+      {/* Modal Entrevista - CON GUARDADO INMEDIATO */}
+      <Dialog open={entrevistaOpen} onOpenChange={cerrarEntrevista}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <MessageCircle className="h-5 w-5" />
               Entrevista: {clienteActual.nombreNegocio}
               {guardadoAutomatico && (
-                <Badge variant="outline" className="ml-2 text-green-600 border-green-300">
+                <Badge variant="outline" className="ml-2 text-green-600 border-green-300 bg-green-50">
                   <Save className="h-3 w-3 mr-1" /> Guardado
                 </Badge>
               )}
@@ -1639,7 +1673,7 @@ export default function Home() {
                   key={i}
                   variant={i === bloqueActual ? 'default' : 'outline'}
                   size="sm"
-                  onClick={() => setBloqueActual(i)}
+                  onClick={() => irABloque(i)}
                   className="text-xs"
                 >
                   B{i + 1}
@@ -1678,7 +1712,7 @@ export default function Home() {
                         {pregunta.tipo === 'texto' && (
                           <Input
                             value={respuestas[pregunta.id] || ''}
-                            onChange={(e) => setRespuestas({...respuestas, [pregunta.id]: e.target.value})}
+                            onChange={(e) => actualizarRespuesta(pregunta.id, e.target.value)}
                             placeholder="Respuesta..."
                           />
                         )}
@@ -1686,7 +1720,7 @@ export default function Home() {
                         {pregunta.tipo === 'texto_largo' && (
                           <Textarea
                             value={respuestas[pregunta.id] || ''}
-                            onChange={(e) => setRespuestas({...respuestas, [pregunta.id]: e.target.value})}
+                            onChange={(e) => actualizarRespuesta(pregunta.id, e.target.value)}
                             placeholder="Respuesta..."
                             rows={3}
                           />
@@ -1696,7 +1730,7 @@ export default function Home() {
                           <Input
                             type="number"
                             value={respuestas[pregunta.id] || ''}
-                            onChange={(e) => setRespuestas({...respuestas, [pregunta.id]: e.target.value})}
+                            onChange={(e) => actualizarRespuesta(pregunta.id, e.target.value)}
                             placeholder="0"
                           />
                         )}
@@ -1704,7 +1738,7 @@ export default function Home() {
                         {pregunta.tipo === 'opcion' && (
                           <Select
                             value={respuestas[pregunta.id] || ''}
-                            onValueChange={(value) => setRespuestas({...respuestas, [pregunta.id]: value})}
+                            onValueChange={(value) => actualizarRespuesta(pregunta.id, value)}
                           >
                             <SelectTrigger>
                               <SelectValue placeholder="Seleccionar..." />
